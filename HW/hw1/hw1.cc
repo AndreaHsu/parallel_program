@@ -3,9 +3,32 @@
 using namespace std;
 #define EVEN_STAGE 1
 #define ODD_STAGE 2
-// #define ODD 1
-// #define EVEN 0
+#define ODD 1
+#define EVEN 0
 
+void radix_sort(float arr[], int len){
+    for(int i = 0; i < len; i++){
+        reinterpret_cast<int &>(arr[i]) = (reinterpret_cast<int &>(arr[i]) >> 31 & 0x1) ? (~reinterpret_cast<int &>(arr[i])) : (reinterpret_cast<int &>(arr[i]) | 0x80000000);
+    }
+    vector<float> bucket[256];
+    for(int i = 0; i < 4; i++){
+        for(int j = 0; j < len; j++){
+            bucket[(reinterpret_cast<int &>(arr[j]) >> (i * 8)) & 0xff].push_back(arr[j]);
+        }
+        int idx = 0;
+        int bucketLen = 0;
+        for(int j = 0; j < 256; j++){
+            bucketLen = bucket[j].size();
+            for(int k = 0; k < bucketLen; k++){
+                arr[idx++] = bucket[j][k];
+            }
+            bucket[j].clear();
+        }
+    }
+    for(int i = 0; i < len; i++){
+        reinterpret_cast<int &>(arr[i]) = (reinterpret_cast<int &>(arr[i]) >> 31 & 0x1) ? (reinterpret_cast<int &>(arr[i]) & 0x7fffffff) : (~reinterpret_cast<int &>(arr[i]));
+    }
+}
 
 void merge_large(int sizeA, int sizeB, int sizeC, float* dataA, float* dataB, float* dataC){
     int idxA = sizeA - 1;
@@ -68,7 +91,7 @@ int main(int argc, char ** argv){
 
     MPI_Comm_size(MPI_COMM_WORLD, &numpOfProcess);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    // int flag = (rank % 2) ? ODD : EVEN;
+    int flag = (rank % 2) ? ODD : EVEN;
     
     // TODO: ??
     if(numpOfProcess > arrSize) numpOfProcess = arrSize;
@@ -79,6 +102,7 @@ int main(int argc, char ** argv){
     localOffset = (rank < remainder) ? (sizeof(float) * rank * localSize) : (sizeof(float) * (remainder + rank * localSize));
     localDataBuf = (float*) malloc(sizeof(float) * localSize);
 
+    if(rank >= arrSize) localSize = 0;
     // cout << "rank: " << rank << ", localSize: " << localSize << ", localOffset: " << localOffset << endl;
     // 2. Read data
     MPI_File fin;
@@ -86,7 +110,7 @@ int main(int argc, char ** argv){
     MPI_File_read_at(fin, localOffset, localDataBuf, localSize, MPI_FLOAT, MPI_STATUS_IGNORE);
     MPI_File_close(&fin);
 
-    sort(localDataBuf, localDataBuf+localSize);
+    radix_sort(localDataBuf, localSize);
     // cout << "Before Rank: " << rank << endl;
     // for(int i = 0; i < localSize; i++){
     //     cout << localDataBuf[i] << " ";
@@ -102,7 +126,7 @@ int main(int argc, char ** argv){
     float* evenRecvBuf;
     float* oddRecvBuf;
 
-    if(rank % 2){
+    if(flag){
         // rank is odd
         evenNeighbor = rank - 1;
         oddNeighbor = (rank == (numpOfProcess - 1)) ? MPI_PROC_NULL : (rank + 1);
@@ -124,34 +148,39 @@ int main(int argc, char ** argv){
     // 4. Odd Even Sort
     float* mergeDataBuf = (float*) malloc(sizeof(float) * localSize);
     int maxSortNum = numpOfProcess+1;
+    MPI_Request sendReq, recvReq;
     
     for(int i = 0; i < maxSortNum; i++){
         if(rank >= numpOfProcess) break;
         if(i % 2){
             // Odd Stage
             if(oddNeighbor < 0) continue;
-            if(rank % 2){
+            MPI_Isend(localDataBuf, localSize, MPI_FLOAT, oddNeighbor, ODD_STAGE, MPI_COMM_WORLD, &sendReq);
+            MPI_Irecv(oddRecvBuf, oddSize, MPI_FLOAT, oddNeighbor, ODD_STAGE, MPI_COMM_WORLD, &recvReq);
+            MPI_Wait(&sendReq, MPI_STATUS_IGNORE);
+            MPI_Wait(&recvReq, MPI_STATUS_IGNORE);
+            if(flag){
                 // rank is odd, get smaller half
-                MPI_Sendrecv(localDataBuf, localSize, MPI_FLOAT, oddNeighbor, ODD_STAGE, oddRecvBuf, oddSize, MPI_FLOAT, oddNeighbor, ODD_STAGE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 // debugPrint(rank, oddNeighbor, oddSize, oddRecvBuf, "OddStage-odd-smaller");
                 merge_small(localSize, oddSize, localSize, localDataBuf, oddRecvBuf, mergeDataBuf);
             }else{
                 // rank is even, get larger half
-                MPI_Sendrecv(localDataBuf, localSize, MPI_FLOAT, oddNeighbor, ODD_STAGE, oddRecvBuf, oddSize, MPI_FLOAT, oddNeighbor, ODD_STAGE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 // debugPrint(rank, oddNeighbor, oddSize, oddRecvBuf, "OddStage-even-larger");
                 merge_large(localSize, oddSize, localSize, localDataBuf, oddRecvBuf, mergeDataBuf);
             }
         }else{
             // Even Stage
             if(evenNeighbor < 0) continue;
-            if(rank % 2){
+            MPI_Isend(localDataBuf, localSize, MPI_FLOAT, evenNeighbor, EVEN_STAGE, MPI_COMM_WORLD, &sendReq);
+            MPI_Irecv(evenRecvBuf, evenSize, MPI_FLOAT, evenNeighbor, EVEN_STAGE, MPI_COMM_WORLD, &recvReq);
+            MPI_Wait(&sendReq, MPI_STATUS_IGNORE);
+            MPI_Wait(&recvReq, MPI_STATUS_IGNORE);
+            if(flag){
                 // rank is odd, get larger half
-                MPI_Sendrecv(localDataBuf, localSize, MPI_FLOAT, evenNeighbor, EVEN_STAGE, evenRecvBuf, evenSize, MPI_FLOAT, evenNeighbor, EVEN_STAGE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 // debugPrint(rank, evenNeighbor, evenSize, evenRecvBuf, "EvenStage-odd-larger");
                 merge_large(localSize, evenSize, localSize, localDataBuf, evenRecvBuf, mergeDataBuf);
             }else{
                 // rank is even, get smaller half
-                MPI_Sendrecv(localDataBuf, localSize, MPI_FLOAT, evenNeighbor, EVEN_STAGE, evenRecvBuf, evenSize, MPI_FLOAT, evenNeighbor, EVEN_STAGE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 // debugPrint(rank, evenNeighbor, evenSize, evenRecvBuf, "EvenStage-even-smaller");
                 merge_small(localSize, evenSize, localSize, localDataBuf, evenRecvBuf, mergeDataBuf);
             }
@@ -159,11 +188,6 @@ int main(int argc, char ** argv){
         swap(localDataBuf, mergeDataBuf);
     }
     // 5. Write data
-    if(rank >= arrSize){
-        localSize = 0;
-        delete [] localDataBuf;
-        localOffset = 0;
-    }
     MPI_File fout;
     MPI_File_open(MPI_COMM_WORLD, argv[3], MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fout);
     // cout << argv[3] << " , Final rank: " << rank << ", localSize: " << localSize << ", localOffset: " << localOffset << endl;

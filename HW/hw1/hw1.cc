@@ -1,4 +1,5 @@
 #include <bits/stdc++.h>
+#include <boost/sort/spreadsort/spreadsort.hpp>
 #include <mpi.h>
 using namespace std;
 #define EVEN_STAGE 1
@@ -110,7 +111,7 @@ int main(int argc, char ** argv){
     MPI_File_read_at(fin, localOffset, localDataBuf, localSize, MPI_FLOAT, MPI_STATUS_IGNORE);
     MPI_File_close(&fin);
 
-    radix_sort(localDataBuf, localSize);
+    if(localSize) boost::sort::spreadsort::spreadsort(localDataBuf, localDataBuf+localSize);
     // cout << "Before Rank: " << rank << endl;
     // for(int i = 0; i < localSize; i++){
     //     cout << localDataBuf[i] << " ";

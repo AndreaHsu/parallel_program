@@ -10,6 +10,7 @@
 #include <string.h>
 #include <mpi.h>
 #include <omp.h>
+#include <emmintrin.h>
 
 void write_png(const char* filename, int iters, int width, int height, const int* buffer) {
     FILE* fp = fopen(filename, "wb");
@@ -68,7 +69,7 @@ int main(int argc, char** argv) {
     int height = strtol(argv[8], 0, 10);
     double heightInterval = ((upper - lower) / height);
     double widthInterval = ((right - left) / width);
-    int chunk_size = 64;
+    // int chunk_size = 64;
     int img_size = width * height;
 
     int rank, numOfProcess, localOffset;
@@ -95,23 +96,87 @@ int main(int argc, char** argv) {
     /* mandelbrot set */
 
     #pragma omp parallel for schedule(dynamic) num_threads(numOfThread)
-        for (int j = rank; j < height; j+=numOfProcess) {
-            double y0 = j * heightInterval + lower;
-            for (int i = 0; i < width; ++i) {
-                double x0 = i * widthInterval + left;
+        for (int curHeight = rank; curHeight < height; curHeight+=numOfProcess) {
+            __m128d cImag = _mm_set1_pd(curHeight * heightInterval + lower);
+            __m128d cReal =  _mm_setzero_pd();
+            __m128d zImag =  _mm_setzero_pd();
+            __m128d zReal =  _mm_setzero_pd();
+            __m128d zzImag =  _mm_setzero_pd();
+            __m128d zzReal =  _mm_setzero_pd();
+            __m128d zRealzImag = _mm_setzero_pd();
+            __m128d length_squared = _mm_setzero_pd();
 
-                int repeats = 0;
-                double x = 0;
-                double y = 0;
-                double length_squared = 0;
-                while (repeats < iters && length_squared < 4) {
-                    double temp = x * x - y * y + x0;
-                    y = 2 * x * y + y0;
-                    x = temp;
-                    length_squared = x * x + y * y;
-                    ++repeats;
+            int curPointer[2] = {-1, -1};
+            int repeats[2] = {0, 0};
+            int curWidth = 0;
+            // iterate every pixel in one row
+            while(curWidth < width){
+                // 1. initialize 2 value
+                if(curPointer[0] == -1){
+                    cReal[0] = curWidth * widthInterval + left;
+                    zReal[0] = zImag[0] = zzReal[0] = zzImag[0] = length_squared[0] = 0;
+                    repeats[0] = 0;
+                    curPointer[0] = curWidth;
+                    curWidth++;
                 }
-                localImage[j * width + i] = repeats;
+                if(curPointer[1] == -1){
+                    cReal[1] = curWidth * widthInterval + left;
+                    zReal[1] = zImag[1] = zzReal[1] = zzImag[1] = length_squared[1] = 0;
+                    repeats[1] = 0;
+                    curPointer[1] = curWidth;
+                    curWidth++;
+                }
+
+                // 2. mandelbrot set
+                while(repeats[0] < iters && repeats[1] < iters && length_squared[0] < 4 && length_squared[1] < 4){
+                    zRealzImag = _mm_mul_pd(zReal, zImag); 
+                    zImag = _mm_add_pd(_mm_add_pd(zRealzImag, zRealzImag), cImag); 
+                    zReal = _mm_add_pd(_mm_sub_pd(zzReal, zzImag), cReal); 
+                    zzReal = _mm_mul_pd(zReal, zReal);
+                    zzImag = _mm_mul_pd(zImag, zImag);
+                    length_squared = _mm_add_pd(zzReal, zzImag);
+                    repeats[0]++;
+                    repeats[1]++;
+                }
+
+                // 3. TODO: set color for the done one
+                if(repeats[0] >= iters || length_squared[0] >= 4){
+                    localImage[curHeight * width + curPointer[0]] = repeats[0];
+                    curPointer[0] = -1;
+                }
+                if(repeats[1] >= iters || length_squared[1] >= 4){
+                    localImage[curHeight * width + curPointer[1]] = repeats[1];
+                    curPointer[1] = -1;
+                }
+            }
+
+            // finish the rest value in one row
+            double zRealzImag_d;
+            if(curPointer[0] != -1){
+                while(repeats[0] < iters && length_squared[0] < 4){
+                    zRealzImag_d = zReal[0]*zImag[0]; 
+                    zImag[0] = zRealzImag_d*2 + cImag[0]; 
+                    zReal[0] = zzReal[0] - zzImag[0] + cReal[0]; 
+                    zzReal[0] = zReal[0] * zReal[0];
+                    zzImag[0] = zImag[0] * zImag[0];
+                    length_squared[0] = zzReal[0] + zzImag[0];
+                    repeats[0]++;
+                }
+                // TODO: set color for the done one
+                localImage[curHeight * width + curPointer[0]] = repeats[0];
+            }
+            if(curPointer[1] != -1){
+                while(repeats[1] < iters && length_squared[1] < 4){
+                    zRealzImag_d = zReal[1]*zImag[1]; 
+                    zImag[1] = zRealzImag_d*2 + cImag[1]; 
+                    zReal[1] = zzReal[1] - zzImag[1] + cReal[1]; 
+                    zzReal[1] = zReal[1] * zReal[1];
+                    zzImag[1] = zImag[1] * zImag[1];
+                    length_squared[1] = zzReal[1] + zzImag[1];
+                    repeats[1]++;
+                }
+                // TODO: set color for the done one
+                localImage[curHeight * width + curPointer[1]] = repeats[1];
             }
         }
 

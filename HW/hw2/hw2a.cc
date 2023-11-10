@@ -55,7 +55,7 @@ void write_png(const char* filename, int iters, int width, int height, const int
 
 void* mandelbrot(void *id){
     int tid = *(int*) id;
-
+    
     for (int curHeight = tid; curHeight < height; curHeight+=numOfThread) {
         __m128d cImag = _mm_set1_pd(curHeight * heightInterval + lower);
         __m128d cReal =  _mm_setzero_pd();
@@ -74,14 +74,14 @@ void* mandelbrot(void *id){
             // 1. initialize 2 value
             if(curPointer[0] == -1){
                 cReal[0] = curWidth * widthInterval + left;
-                zReal[0] = zImag[0] = zzReal[0] = zzImag[0] = length_squared[0] = 0;
+                zReal[0] = zImag[0] = zzReal[0] = zzImag[0] = length_squared[0] = 0.0;
                 repeats[0] = 0;
                 curPointer[0] = curWidth;
                 curWidth++;
             }
             if(curPointer[1] == -1){
                 cReal[1] = curWidth * widthInterval + left;
-                zReal[1] = zImag[1] = zzReal[1] = zzImag[1] = length_squared[1] = 0;
+                zReal[1] = zImag[1] = zzReal[1] = zzImag[1] = length_squared[1] = 0.0;
                 repeats[1] = 0;
                 curPointer[1] = curWidth;
                 curWidth++;
@@ -115,11 +115,11 @@ void* mandelbrot(void *id){
         if(curPointer[0] != -1){
             while(repeats[0] < iters && length_squared[0] < 4){
                 zRealzImag_d = zReal[0]*zImag[0]; 
-                zImag[0] = zRealzImag_d*2 + cImag[0]; 
+                zImag[0] = zRealzImag_d + zRealzImag_d + cImag[0]; 
                 zReal[0] = zzReal[0] - zzImag[0] + cReal[0]; 
                 zzReal[0] = zReal[0] * zReal[0];
                 zzImag[0] = zImag[0] * zImag[0];
-                length_squared[0] = zzReal[0] * zzImag[0];
+                length_squared[0] = zzReal[0] + zzImag[0];
                 repeats[0]++;
             }
             // TODO: set color for the done one
@@ -128,11 +128,11 @@ void* mandelbrot(void *id){
         if(curPointer[1] != -1){
             while(repeats[1] < iters && length_squared[1] < 4){
                 zRealzImag_d = zReal[1]*zImag[1]; 
-                zImag[1] = zRealzImag_d*2 + cImag[1]; 
+                zImag[1] = zRealzImag_d + zRealzImag_d + cImag[1]; 
                 zReal[1] = zzReal[1] - zzImag[1] + cReal[1]; 
                 zzReal[1] = zReal[1] * zReal[1];
                 zzImag[1] = zImag[1] * zImag[1];
-                length_squared[1] = zzReal[1] * zzImag[1];
+                length_squared[1] = zzReal[1] + zzImag[1];
                 repeats[1]++;
             }
             // TODO: set color for the done one
@@ -160,8 +160,8 @@ int main(int argc, char** argv) {
     width = strtol(argv[7], 0, 10);
     height = strtol(argv[8], 0, 10);
 
-    heightInterval = ((upper - lower) / height);
-    widthInterval = ((right - left) / width);
+    heightInterval = ((double)(upper - lower) / (double)height);
+    widthInterval = ((double)(right - left) / (double)width);
 
     /* allocate memory for image */
     image = (int*)malloc(width * height * sizeof(int));

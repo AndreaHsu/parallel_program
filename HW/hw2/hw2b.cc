@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #define PNG_NO_SETJMP
+#define unlikely(x) __builtin_expect(!!(x), 0)
 #include <sched.h>
 #include <assert.h>
 #include <png.h>
@@ -11,6 +12,7 @@
 #include <mpi.h>
 #include <omp.h>
 #include <emmintrin.h>
+
 
 void write_png(const char* filename, int iters, int width, int height, const int* buffer) {
     FILE* fp = fopen(filename, "wb");
@@ -35,9 +37,9 @@ void write_png(const char* filename, int iters, int width, int height, const int
             if (p != iters) {
                 if (p & 16) {
                     color[0] = 240;
-                    color[1] = color[2] = p % 16 * 16;
+                    color[1] = color[2] = (p & 15) * 16;
                 } else {
-                    color[0] = p % 16 * 16;
+                    color[0] = (p & 15) * 16;
                 }
             }
         }
@@ -69,7 +71,6 @@ int main(int argc, char** argv) {
     int height = strtol(argv[8], 0, 10);
     double heightInterval = ((upper - lower) / height);
     double widthInterval = ((right - left) / width);
-    // int chunk_size = 64;
     int img_size = width * height;
 
     int rank, numOfProcess, localOffset;
@@ -77,15 +78,9 @@ int main(int argc, char** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &numOfProcess);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    // 1. Partition data
-    // int quotient = img_size / numOfProcess;
-    // int remainder = img_size % numOfProcess; 
-    // int localSize = quotient + (rank < remainder);
-    // localOffset = (rank < remainder) ? (sizeof(int) * rank * localSize) : (sizeof(int) * (remainder + rank * localSize));
-    // localDataBuf = new int[localSize]
     int* image = NULL;
     int* localImage = NULL;
-    if(rank == 0){
+    if(unlikely(rank == 0)){
         image = (int*)malloc(img_size * sizeof(int));
         assert(image);
     }
@@ -184,7 +179,7 @@ int main(int argc, char** argv) {
     free(localImage);
     MPI_Finalize();
     /* draw and cleanup */
-    if(rank == 0){
+    if(unlikely(rank == 0)){
         write_png(filename, iters, width, height, image);
         free(image);
     }

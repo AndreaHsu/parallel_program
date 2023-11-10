@@ -1,7 +1,7 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
-#define PNG_NO_SETJMP
+#define PNG_NO_SETJMP          
 #include <sched.h>
 #include <assert.h>
 #include <png.h>
@@ -74,14 +74,14 @@ void* mandelbrot(void *id){
             // 1. initialize 2 value
             if(curPointer[0] == -1){
                 cReal[0] = curWidth * widthInterval + left;
-                zReal[0] = zImag[0] = zzReal[0] = zzImag[0] = length_squared[0] = 0.0;
+                zReal[0] = zImag[0] = zzReal[0] = zzImag[0] = length_squared[0] = 0;
                 repeats[0] = 0;
                 curPointer[0] = curWidth;
                 curWidth++;
             }
             if(curPointer[1] == -1){
                 cReal[1] = curWidth * widthInterval + left;
-                zReal[1] = zImag[1] = zzReal[1] = zzImag[1] = length_squared[1] = 0.0;
+                zReal[1] = zImag[1] = zzReal[1] = zzImag[1] = length_squared[1] = 0;
                 repeats[1] = 0;
                 curPointer[1] = curWidth;
                 curWidth++;

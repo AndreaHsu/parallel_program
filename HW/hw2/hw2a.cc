@@ -15,8 +15,20 @@
 int numOfThread, height, width, iters;
 double left, right, upper, lower, heightInterval, widthInterval;
 int* image;
+png_bytep* rows;
 
-void write_png(const char* filename, int iters, int width, int height, const int* buffer) {
+void save_color(png_bytep color, int p){
+    if (p != iters) {
+        if (p & 16) {
+            color[0] = 240;
+            color[1] = color[2] = p % 16 * 16;
+        } else {
+            color[0] = p % 16 * 16;
+        }
+    }
+}
+
+void write_png(const char* filename) {
     FILE* fp = fopen(filename, "wb");
     assert(fp);
     png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
@@ -29,25 +41,11 @@ void write_png(const char* filename, int iters, int width, int height, const int
     png_set_filter(png_ptr, 0, PNG_NO_FILTERS);
     png_write_info(png_ptr, info_ptr);
     png_set_compression_level(png_ptr, 1);
-    size_t row_size = 3 * width * sizeof(png_byte);
-    png_bytep row = (png_bytep)malloc(row_size);
+
     for (int y = 0; y < height; ++y) {
-        memset(row, 0, row_size);
-        for (int x = 0; x < width; ++x) {
-            int p = buffer[(height - 1 - y) * width + x];
-            png_bytep color = row + x * 3;
-            if (p != iters) {
-                if (p & 16) {
-                    color[0] = 240;
-                    color[1] = color[2] = p % 16 * 16;
-                } else {
-                    color[0] = p % 16 * 16;
-                }
-            }
-        }
-        png_write_row(png_ptr, row);
+        png_write_row(png_ptr, rows[y]);
+        free(rows[y]);
     }
-    free(row);
     png_write_end(png_ptr, NULL);
     png_destroy_write_struct(&png_ptr, &info_ptr);
     fclose(fp);
@@ -69,6 +67,12 @@ void* mandelbrot(void *id){
         int curPointer[2] = {-1, -1};
         int repeats[2] = {0, 0};
         int curWidth = 0;
+
+        size_t row_size = 3 * width * sizeof(png_byte);
+        png_bytep curRow = (png_bytep)malloc(row_size);
+        memset(curRow, 0, row_size);
+        rows[height - 1 - curHeight] = curRow;
+        
         // iterate every pixel in one row
         while(curWidth < width){
             // 1. initialize 2 value
@@ -101,11 +105,11 @@ void* mandelbrot(void *id){
 
             // 3. TODO: set color for the done one
             if(repeats[0] >= iters || length_squared[0] >= 4){
-                image[curHeight * width + curPointer[0]] = repeats[0];
+                save_color(curRow+curPointer[0]*3, repeats[0]);
                 curPointer[0] = -1;
             }
             if(repeats[1] >= iters || length_squared[1] >= 4){
-                image[curHeight * width + curPointer[1]] = repeats[1];
+                save_color(curRow+curPointer[1]*3, repeats[1]);
                 curPointer[1] = -1;
             }
         }
@@ -123,7 +127,7 @@ void* mandelbrot(void *id){
                 repeats[0]++;
             }
             // TODO: set color for the done one
-            image[curHeight * width + curPointer[0]] = repeats[0];
+            save_color(curRow+curPointer[0]*3, repeats[0]);
         }
         if(curPointer[1] != -1){
             while(repeats[1] < iters && length_squared[1] < 4){
@@ -136,7 +140,7 @@ void* mandelbrot(void *id){
                 repeats[1]++;
             }
             // TODO: set color for the done one
-            image[curHeight * width + curPointer[1]] = repeats[1];
+            save_color(curRow+curPointer[1]*3, repeats[1]);
         }
     }
 
@@ -164,8 +168,7 @@ int main(int argc, char** argv) {
     widthInterval = ((double)(right - left) / (double)width);
 
     /* allocate memory for image */
-    image = (int*)malloc(width * height * sizeof(int));
-    assert(image);
+    rows = (png_bytep*)malloc(height * sizeof(png_bytep));
 
     pthread_t threads[numOfThread];
 	int* tid = new int[numOfThread];
@@ -181,8 +184,6 @@ int main(int argc, char** argv) {
 		pthread_join(threads[i], NULL);
 	}
     
-
     /* draw and cleanup */
-    write_png(filename, iters, width, height, image);
-    free(image);
+    write_png(filename);
 }

@@ -37,9 +37,9 @@ void write_png(const char* filename, int iters, int width, int height, const int
             if (p != iters) {
                 if (p & 16) {
                     color[0] = 240;
-                    color[1] = color[2] = (p & 15) * 16;
+                    color[1] = color[2] = (p % 16) * 16;
                 } else {
-                    color[0] = (p & 15) * 16;
+                    color[0] = (p % 16) * 16;
                 }
             }
         }
@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
     cpu_set_t cpu_set;
     sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
     // printf("%d cpus available\n", CPU_COUNT(&cpu_set));
-    int numOfThread = CPU_COUNT(&cpu_set);
+    int numOfThread = CPU_COUNT(&cpu_set)*8;
     
     /* argument parsing */
     assert(argc == 9);
@@ -105,9 +105,10 @@ int main(int argc, char** argv) {
             int repeats[2] = {0, 0};
             int curWidth = 0;
             // iterate every pixel in one row
-            while(curWidth < width){
+            while(true){
                 // 1. initialize 2 value
                 if(curPointer[0] == -1){
+                    if(curWidth == width) break;
                     cReal[0] = curWidth * widthInterval + left;
                     zReal[0] = zImag[0] = zzReal[0] = zzImag[0] = length_squared[0] = 0;
                     repeats[0] = 0;
@@ -115,6 +116,7 @@ int main(int argc, char** argv) {
                     curWidth++;
                 }
                 if(curPointer[1] == -1){
+                    if(curWidth == width) break;
                     cReal[1] = curWidth * widthInterval + left;
                     zReal[1] = zImag[1] = zzReal[1] = zzImag[1] = length_squared[1] = 0;
                     repeats[1] = 0;

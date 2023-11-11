@@ -15,20 +15,8 @@
 int numOfThread, height, width, iters;
 double left, right, upper, lower, heightInterval, widthInterval;
 int* image;
-png_bytep* rows;
 
-void save_color(png_bytep color, int p){
-    if (p != iters) {
-        if (p & 16) {
-            color[0] = 240;
-            color[1] = color[2] = p % 16 * 16;
-        } else {
-            color[0] = p % 16 * 16;
-        }
-    }
-}
-
-void write_png(const char* filename) {
+void write_png(const char* filename, int iters, int width, int height, const int* buffer) {
     FILE* fp = fopen(filename, "wb");
     assert(fp);
     png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
@@ -41,11 +29,25 @@ void write_png(const char* filename) {
     png_set_filter(png_ptr, 0, PNG_NO_FILTERS);
     png_write_info(png_ptr, info_ptr);
     png_set_compression_level(png_ptr, 1);
-
+    size_t row_size = 3 * width * sizeof(png_byte);
+    png_bytep row = (png_bytep)malloc(row_size);
     for (int y = 0; y < height; ++y) {
-        png_write_row(png_ptr, rows[y]);
-        free(rows[y]);
+        memset(row, 0, row_size);
+        for (int x = 0; x < width; ++x) {
+            int p = buffer[(height - 1 - y) * width + x];
+            png_bytep color = row + x * 3;
+            if (p != iters) {
+                if (p & 16) {
+                    color[0] = 240;
+                    color[1] = color[2] = p % 16 * 16;
+                } else {
+                    color[0] = p % 16 * 16;
+                }
+            }
+        }
+        png_write_row(png_ptr, row);
     }
+    free(row);
     png_write_end(png_ptr, NULL);
     png_destroy_write_struct(&png_ptr, &info_ptr);
     fclose(fp);
@@ -55,7 +57,7 @@ void* mandelbrot(void *id){
     int tid = *(int*) id;
     
     for (int curHeight = tid; curHeight < height; curHeight+=numOfThread) {
-        __m128d cImag = _mm_set1_pd(curHeight * heightInterval + lower);
+        __m128d cImag = _mm_set_pd1(curHeight * heightInterval + lower);
         __m128d cReal =  _mm_setzero_pd();
         __m128d zImag =  _mm_setzero_pd();
         __m128d zReal =  _mm_setzero_pd();
@@ -67,16 +69,12 @@ void* mandelbrot(void *id){
         int curPointer[2] = {-1, -1};
         int repeats[2] = {0, 0};
         int curWidth = 0;
-
-        size_t row_size = 3 * width * sizeof(png_byte);
-        png_bytep curRow = (png_bytep)malloc(row_size);
-        memset(curRow, 0, row_size);
-        rows[height - 1 - curHeight] = curRow;
-        
+        int curRow = curHeight*width;
         // iterate every pixel in one row
-        while(curWidth < width){
+        while(true){
             // 1. initialize 2 value
             if(curPointer[0] == -1){
+                if(curWidth == width) break;
                 cReal[0] = curWidth * widthInterval + left;
                 zReal[0] = zImag[0] = zzReal[0] = zzImag[0] = length_squared[0] = 0;
                 repeats[0] = 0;
@@ -84,6 +82,7 @@ void* mandelbrot(void *id){
                 curWidth++;
             }
             if(curPointer[1] == -1){
+                if(curWidth == width) break;
                 cReal[1] = curWidth * widthInterval + left;
                 zReal[1] = zImag[1] = zzReal[1] = zzImag[1] = length_squared[1] = 0;
                 repeats[1] = 0;
@@ -105,11 +104,11 @@ void* mandelbrot(void *id){
 
             // 3. TODO: set color for the done one
             if(repeats[0] >= iters || length_squared[0] >= 4){
-                save_color(curRow+curPointer[0]*3, repeats[0]);
+                image[curRow + curPointer[0]] = repeats[0];
                 curPointer[0] = -1;
             }
             if(repeats[1] >= iters || length_squared[1] >= 4){
-                save_color(curRow+curPointer[1]*3, repeats[1]);
+                image[curRow + curPointer[1]] = repeats[1];
                 curPointer[1] = -1;
             }
         }
@@ -127,7 +126,7 @@ void* mandelbrot(void *id){
                 repeats[0]++;
             }
             // TODO: set color for the done one
-            save_color(curRow+curPointer[0]*3, repeats[0]);
+            image[curRow + curPointer[0]] = repeats[0];
         }
         if(curPointer[1] != -1){
             while(repeats[1] < iters && length_squared[1] < 4){
@@ -140,7 +139,7 @@ void* mandelbrot(void *id){
                 repeats[1]++;
             }
             // TODO: set color for the done one
-            save_color(curRow+curPointer[1]*3, repeats[1]);
+            image[curRow + curPointer[1]] = repeats[1];
         }
     }
 
@@ -164,11 +163,15 @@ int main(int argc, char** argv) {
     width = strtol(argv[7], 0, 10);
     height = strtol(argv[8], 0, 10);
 
-    heightInterval = ((double)(upper - lower) / (double)height);
-    widthInterval = ((double)(right - left) / (double)width);
+    heightInterval = ((upper - lower) / height);
+    // heightInterval = ((double)(upper - lower) / (double)height);
+    widthInterval = ((right - left) / width);
+    // widthInterval = ((double)(right - left) / (double)width);
 
     /* allocate memory for image */
-    rows = (png_bytep*)malloc(height * sizeof(png_bytep));
+    int img_size = width * height;
+    image = (int*)malloc(img_size * sizeof(int));
+    // assert(image);
 
     pthread_t threads[numOfThread];
 	int* tid = new int[numOfThread];
@@ -179,11 +182,11 @@ int main(int argc, char** argv) {
 	}
 
     /* mandelbrot set */
-
 	for(int i = 0; i < numOfThread; i++){
 		pthread_join(threads[i], NULL);
 	}
-    
+
     /* draw and cleanup */
-    write_png(filename);
+    write_png(filename, iters, width, height, image);
+    free(image);
 }

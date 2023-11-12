@@ -12,7 +12,8 @@
 #include <mpi.h>
 #include <omp.h>
 #include <emmintrin.h>
-
+#include <bits/stdc++.h>
+using namespace std;
 
 void write_png(const char* filename, int iters, int width, int height, const int* buffer) {
     FILE* fp = fopen(filename, "wb");
@@ -37,9 +38,9 @@ void write_png(const char* filename, int iters, int width, int height, const int
             if (p != iters) {
                 if (p & 16) {
                     color[0] = 240;
-                    color[1] = color[2] = (p % 16) * 16;
+                    color[1] = color[2] = (p & 15) * 16;
                 } else {
-                    color[0] = (p % 16) * 16;
+                    color[0] = (p & 15) * 16;
                 }
             }
         }
@@ -53,11 +54,21 @@ void write_png(const char* filename, int iters, int width, int height, const int
 
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
+    /*Time*/
+    float startCal = MPI_Wtime();
+    float startTime;
+    float endTime;
+    float totalCalculateTime;
+    float totalCommunicateTime;
+    float totalIoTime;
+    float localCalculateTime = 0.0;
+    float localCommunicateTime = 0.0;
+    float localIoTime = 0.0;
+
     /* detect how many CPUs are available */
     cpu_set_t cpu_set;
     sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
-    // printf("%d cpus available\n", CPU_COUNT(&cpu_set));
-    int numOfThread = CPU_COUNT(&cpu_set);
+    int numOfThread = CPU_COUNT(&cpu_set)*4;
     
     /* argument parsing */
     assert(argc == 9);
@@ -89,7 +100,6 @@ int main(int argc, char** argv) {
     memset(localImage, 0, img_size * sizeof(int));
 
     /* mandelbrot set */
-
     #pragma omp parallel for schedule(dynamic) num_threads(numOfThread)
         for (int curHeight = rank; curHeight < height; curHeight+=numOfProcess) {
             __m128d cImag = _mm_set1_pd(curHeight * heightInterval + lower);
@@ -136,6 +146,7 @@ int main(int argc, char** argv) {
                     repeats[1]++;
                 }
 
+                // 3. TODO: set color for the done one
                 if(repeats[0] >= iters || length_squared[0] >= 4){
                     localImage[curHeight * width + curPointer[0]] = repeats[0];
                     curPointer[0] = -1;
@@ -158,6 +169,7 @@ int main(int argc, char** argv) {
                     length_squared[0] = zzReal[0] + zzImag[0];
                     repeats[0]++;
                 }
+                // TODO: set color for the done one
                 localImage[curHeight * width + curPointer[0]] = repeats[0];
             }
             if(curPointer[1] != -1){
@@ -170,16 +182,44 @@ int main(int argc, char** argv) {
                     length_squared[1] = zzReal[1] + zzImag[1];
                     repeats[1]++;
                 }
+                // TODO: set color for the done one
                 localImage[curHeight * width + curPointer[1]] = repeats[1];
             }
         }
-
+    
+    float endCal = MPI_Wtime();
+    localCalculateTime += endCal - startCal;
+    
+    startTime = MPI_Wtime();
     MPI_Reduce(localImage, image, img_size, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+    endTime = MPI_Wtime();
+    localCommunicateTime += endTime - startTime;
+    
     free(localImage);
-    MPI_Finalize();
     /* draw and cleanup */
     if(unlikely(rank == 0)){
+        startTime = MPI_Wtime();
         write_png(filename, iters, width, height, image);
         free(image);
+        endTime = MPI_Wtime();
+        localIoTime += endTime - startTime;
     }
+    
+    MPI_Reduce(&localCalculateTime, &totalCalculateTime, 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&localCommunicateTime, &totalCommunicateTime, 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&localIoTime, &totalIoTime, 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        float tmpTotal = totalCalculateTime/numOfProcess;
+        float tmpCom = totalCommunicateTime/numOfProcess;
+        float tmpIO  = totalIoTime/numOfProcess;
+        cout << tmpTotal << ","
+             << tmpTotal - tmpCom - tmpIO << ","
+             << tmpCom << ","
+             << tmpIO << "\n";
+        // cout << "Total calculate time: " << totalCalculateTime/numOfProcess - tmpCom - tmpIO<< endl
+        //      << "Total communicate time: " << tmpCom << endl
+        //      << "Total io time: " << tmpIO << endl;
+    }
+    MPI_Finalize();
 }

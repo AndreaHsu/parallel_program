@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <time.h>
 #include <emmintrin.h>
+#include <bits/stdc++.h>
 
 int numOfThread, height, width, iters;
 double left, right, upper, lower, heightInterval, widthInterval;
@@ -54,6 +55,8 @@ void write_png(const char* filename, int iters, int width, int height, const int
 }
 
 void* mandelbrot(void *id){
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
     int tid = *(int*) id;
     
     for (int curHeight = tid; curHeight < height; curHeight+=numOfThread) {
@@ -102,6 +105,7 @@ void* mandelbrot(void *id){
                 repeats[1]++;
             }
 
+            // 3. TODO: set color for the done one
             if(repeats[0] >= iters || length_squared[0] >= 4){
                 image[curRow + curPointer[0]] = repeats[0];
                 curPointer[0] = -1;
@@ -124,6 +128,7 @@ void* mandelbrot(void *id){
                 length_squared[0] = zzReal[0] + zzImag[0];
                 repeats[0]++;
             }
+            // TODO: set color for the done one
             image[curRow + curPointer[0]] = repeats[0];
         }
         if(curPointer[1] != -1){
@@ -136,14 +141,23 @@ void* mandelbrot(void *id){
                 length_squared[1] = zzReal[1] + zzImag[1];
                 repeats[1]++;
             }
+            // TODO: set color for the done one
             image[curRow + curPointer[1]] = repeats[1];
         }
     }
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+    // std::cout << tid << " time taken: " << elapsed << " seconds" << std::endl;
+    std::cout << tid << "," << elapsed << std::endl;
 
     pthread_exit(NULL);
 }
 
 int main(int argc, char** argv) {
+    struct timespec total_start, total_end;
+    clock_gettime(CLOCK_MONOTONIC, &total_start);
+
     /* detect how many CPUs are available */
     cpu_set_t cpu_set;
     sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
@@ -161,7 +175,9 @@ int main(int argc, char** argv) {
     height = strtol(argv[8], 0, 10);
 
     heightInterval = ((upper - lower) / height);
+    // heightInterval = ((double)(upper - lower) / (double)height);
     widthInterval = ((right - left) / width);
+    // widthInterval = ((double)(right - left) / (double)width);
 
     /* allocate memory for image */
     int img_size = width * height;
@@ -182,6 +198,15 @@ int main(int argc, char** argv) {
 	}
 
     /* draw and cleanup */
+    struct timespec io_start, io_end;
+    clock_gettime(CLOCK_MONOTONIC, &io_start);
     write_png(filename, iters, width, height, image);
+    clock_gettime(CLOCK_MONOTONIC, &io_end);
+    double io_elapsed = (io_end.tv_sec - io_start.tv_sec) + (io_end.tv_nsec - io_start.tv_nsec) / 1e9;
+    std::cout << "IO," << io_elapsed << std::endl;
     free(image);
+
+    clock_gettime(CLOCK_MONOTONIC, &total_end);
+    double total_elapsed = (total_end.tv_sec - total_start.tv_sec) + (total_end.tv_nsec - total_start.tv_nsec) / 1e9;
+    std::cout << "Total," << total_elapsed << std::endl;
 }

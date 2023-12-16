@@ -1,7 +1,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <pthread.h>
 #include <math.h>
 #include <iostream>
 #include <omp.h>
@@ -44,18 +43,14 @@ int main(int argc, char** argv){
     sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
     numOfThread = CPU_COUNT(&cpu_set);
     read_input(argv[1]);
-    // for(int i = 0; i < v; i++){
-    //     for(int j = 0; j < v; j++){
-    //         std::cout << dis[i][j] << " ";
-    //     }
-    //     std::cout << "\n";
-    // }
+    
     for(int k = 0; k < v; k++){
-        for(int i = 0; i < v; i++){
-            for(int j = 0; j < v; j++){
-                dis[i][j] = min(dis[i][j], dis[i][k]+dis[k][j]);
+        #pragma omp parallel for schedule(static) num_threads(numOfThread)
+            for(int i = 0; i < v; i++){
+                for(int j = 0; j < v; j++){
+                    dis[i][j] = min(dis[i][j], dis[i][k]+dis[k][j]);
+                }
             }
-        }
     }
 
     write_output(argv[2]);

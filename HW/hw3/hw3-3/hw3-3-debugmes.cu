@@ -3,6 +3,7 @@
 #include <cuda.h>
 #include <omp.h>
 
+//======================
 #define DEV_NO 0
 cudaDeviceProp prop;
 const int INF = ((1 << 30) - 1);
@@ -63,7 +64,6 @@ __global__ void block_FW_p1(int* dist, int round, int n){
 
     __syncthreads();
 
-    #pragma unroll 32
     for(int i = 0; i < Blocksize; i++){
         shr[y][x] = min(shr[y][x], shr[y][i] + shr[i][x]);
         shr[y + Half][x] = min(shr[y + Half][x], shr[y + Half][i] + shr[i][x]);
@@ -125,7 +125,6 @@ __global__ void block_FW_p2(int* dist, int round, int n){
         col[y + Half][x] = min(col[y + Half][x], col[y + Half][i] + shr[i][x]);
         col[y][x + Half] = min(col[y][x + Half], col[y][i] + shr[i][x + Half]);
         col[y + Half][x + Half] = min(col[y + Half][x + Half], col[y + Half][i] + shr[i][x + Half]);
-        __syncthreads();
     }
     
     dist[pivotr * n + respc] = row[y][x]; 
@@ -189,7 +188,7 @@ __global__ void block_FW_p3(int* dist, int round, int n, int row_offset){
 }
 
 
-int main(int argc, char* argv[]) { 
+int main(int argc, char* argv[]) {
     input(argv[1]);
     int* ddist[2];
     // cudaHostRegister(Dist, n * n * sizeof(int), cudaHostRegisterDefault);
@@ -201,6 +200,7 @@ int main(int argc, char* argv[]) {
     dim3 num_blocks_p1(1, 1);
     dim3 num_blocks_p2(1, B);
     dim3 num_threads(32, 32);
+    //printf("n: %d, B: %d\n", n, B);
     #pragma omp parallel num_threads(2)
     {
         int id = omp_get_thread_num();
@@ -215,11 +215,14 @@ int main(int argc, char* argv[]) {
             row_offset = B / 2;
             if(B & 1) num_blocks_p3.y++;
         } 
+        //printf("Thread ID: %d, row_offset: %d, num_block_p3.y: %d\n", id, row_offset, num_blocks_p3.y);
 
         for(int i = 0; i < B; i++){
             if(!id && i < B / 2){
+                //printf("thread %d do the %d round\n", id, i);
                 cudaMemcpyPeer(ddist[1] + i * Blocksize * n, 1, ddist[0] + i * Blocksize * n, 0, Blocksize * n * sizeof(int));
             }else if(id && i >= B / 2){
+                //printf("thread %d do the %d round\n", id, i);
                 cudaMemcpyPeer(ddist[0] + i * Blocksize * n, 0, ddist[1] + i * Blocksize * n, 1, Blocksize * n * sizeof(int));
             }
             #pragma omp barrier
@@ -229,7 +232,6 @@ int main(int argc, char* argv[]) {
         }
         cudaMemcpy(Dist + row_offset * Blocksize * n, ddist[id] + row_offset * Blocksize * n, num_blocks_p3.y * Blocksize * n * sizeof(int), cudaMemcpyDeviceToHost);
     }
-
     output(argv[2]);
     return 0;
 }

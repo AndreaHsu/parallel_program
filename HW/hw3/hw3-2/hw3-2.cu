@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda.h>
-#include <omp.h>
 
 #define DEV_NO 0
 cudaDeviceProp prop;
@@ -29,7 +28,7 @@ void input(char* infile) {
             }
         }
     }
-
+    
     int pair[3];
     for (int i = 0; i < m; ++i) {
         fread(pair, sizeof(int), 3, file);
@@ -140,8 +139,8 @@ __global__ void block_FW_p2(int* dist, int round, int n){
     return;
 }
 
-__global__ void block_FW_p3(int* dist, int round, int n, int row_offset){
-    if(blockIdx.x == round || (blockIdx.y + row_offset) == round) return;
+__global__ void block_FW_p3(int* dist, int round, int n){
+    if(blockIdx.x == round || blockIdx.y == round) return;
     __shared__ int shr[Blocksize][Blocksize];
     __shared__ int row[Blocksize][Blocksize];
     __shared__ int col[Blocksize][Blocksize];
@@ -150,7 +149,7 @@ __global__ void block_FW_p3(int* dist, int round, int n, int row_offset){
     int y = threadIdx.y; // row
     // my real col and real row in the whole matrix
     int realc = blockIdx.x * Blocksize + threadIdx.x;
-    int realr = (blockIdx.y + row_offset) * Blocksize + threadIdx.y;
+    int realr = blockIdx.y * Blocksize + threadIdx.y;
     // The needed position to calculate my value
     int neededc = round * Blocksize + threadIdx.x; // if the needed row is the same as me, calculate the needed col
     int neededr = round * Blocksize + threadIdx.y; // if the needed col is the same as me, calculate the needed col
@@ -189,10 +188,12 @@ __global__ void block_FW_p3(int* dist, int round, int n, int row_offset){
 }
 
 
-int main(int argc, char* argv[]) { 
+int main(int argc, char* argv[]) {
     input(argv[1]);
-    int* ddist[2];
+    int* ddist;
     // cudaHostRegister(Dist, n * n * sizeof(int), cudaHostRegisterDefault);
+    cudaMalloc(&ddist, n * n * sizeof(int));
+    cudaMemcpy(ddist, Dist, n * n * sizeof(int), cudaMemcpyHostToDevice);
 
     // cudaGetDeviceProperties(&prop, DEV_NO);
     // printf("maxThreasPerBlock = %d, sharedMemPerBlock = %d", prop.maxThreadsPerBlock, prop.sharedMemPerBlock);
@@ -200,36 +201,16 @@ int main(int argc, char* argv[]) {
     int B = n / Blocksize;
     dim3 num_blocks_p1(1, 1);
     dim3 num_blocks_p2(1, B);
-    dim3 num_threads(32, 32);
-    #pragma omp parallel num_threads(2)
-    {
-        int id = omp_get_thread_num();
-        cudaSetDevice(id);
-        cudaDeviceEnablePeerAccess(!id, 0);
-        cudaMalloc(&(ddist[id]), n * n * sizeof(int));
-        cudaMemcpy(ddist[id], Dist, n * n * sizeof(int), cudaMemcpyHostToDevice);
-        
-        dim3 num_blocks_p3(B, B / 2);
-        int row_offset = 0;
-        if(id){
-            row_offset = B / 2;
-            if(B & 1) num_blocks_p3.y++;
-        } 
+    dim3 num_blocks_p3(B, B);
+    dim3 num_threads(Half, Half);
 
-        for(int i = 0; i < B; i++){
-            if(!id && i < B / 2){
-                cudaMemcpyPeer(ddist[1] + i * Blocksize * n, 1, ddist[0] + i * Blocksize * n, 0, Blocksize * n * sizeof(int));
-            }else if(id && i >= B / 2){
-                cudaMemcpyPeer(ddist[0] + i * Blocksize * n, 0, ddist[1] + i * Blocksize * n, 1, Blocksize * n * sizeof(int));
-            }
-            #pragma omp barrier
-            block_FW_p1<<<num_blocks_p1, num_threads>>>(ddist[id], i, n);
-            block_FW_p2<<<num_blocks_p2, num_threads>>>(ddist[id], i, n);
-            block_FW_p3<<<num_blocks_p3, num_threads>>>(ddist[id], i, n, row_offset);
-        }
-        cudaMemcpy(Dist + row_offset * Blocksize * n, ddist[id] + row_offset * Blocksize * n, num_blocks_p3.y * Blocksize * n * sizeof(int), cudaMemcpyDeviceToHost);
+    for(int i = 0; i < B; i++){
+        block_FW_p1<<<num_blocks_p1, num_threads>>>(ddist, i, n);
+        block_FW_p2<<<num_blocks_p2, num_threads>>>(ddist, i, n);
+        block_FW_p3<<<num_blocks_p3, num_threads>>>(ddist, i, n);
     }
 
+    cudaMemcpy(Dist, ddist, n * n * sizeof(int), cudaMemcpyDeviceToHost);
     output(argv[2]);
     return 0;
 }

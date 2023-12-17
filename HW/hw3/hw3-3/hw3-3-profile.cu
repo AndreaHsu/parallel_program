@@ -64,6 +64,7 @@ __global__ void block_FW_p1(int* dist, int round, int n){
 
     __syncthreads();
 
+    #pragma unroll 32
     for(int i = 0; i < Blocksize; i++){
         shr[y][x] = min(shr[y][x], shr[y][i] + shr[i][x]);
         shr[y + Half][x] = min(shr[y + Half][x], shr[y + Half][i] + shr[i][x]);
@@ -125,6 +126,7 @@ __global__ void block_FW_p2(int* dist, int round, int n){
         col[y + Half][x] = min(col[y + Half][x], col[y + Half][i] + shr[i][x]);
         col[y][x + Half] = min(col[y][x + Half], col[y][i] + shr[i][x + Half]);
         col[y + Half][x + Half] = min(col[y + Half][x + Half], col[y + Half][i] + shr[i][x + Half]);
+        //__syncthreads();
     }
     
     dist[pivotr * n + respc] = row[y][x]; 
@@ -189,7 +191,13 @@ __global__ void block_FW_p3(int* dist, int round, int n, int row_offset){
 
 
 int main(int argc, char* argv[]) {
+    struct timespec io_instart, io_inend, io_outstart, io_outend;
+    double io_elapsed = 0;
+    clock_gettime(CLOCK_MONOTONIC, &io_instart);
     input(argv[1]);
+    clock_gettime(CLOCK_MONOTONIC, &io_inend);
+    io_elapsed += (io_inend.tv_sec - io_instart.tv_sec) + (io_inend.tv_nsec - io_instart.tv_nsec) / 1e9;
+    
     int* ddist[2];
     // cudaHostRegister(Dist, n * n * sizeof(int), cudaHostRegisterDefault);
 
@@ -232,6 +240,10 @@ int main(int argc, char* argv[]) {
         }
         cudaMemcpy(Dist + row_offset * Blocksize * n, ddist[id] + row_offset * Blocksize * n, num_blocks_p3.y * Blocksize * n * sizeof(int), cudaMemcpyDeviceToHost);
     }
+    clock_gettime(CLOCK_MONOTONIC, &io_outstart);
     output(argv[2]);
+    clock_gettime(CLOCK_MONOTONIC, &io_outend);
+    io_elapsed += (io_outend.tv_sec - io_outstart.tv_sec) + (io_outend.tv_nsec - io_outstart.tv_nsec) / 1e9;
+    printf("IO Elapsed Time: %f\n", io_elapsed);
     return 0;
 }

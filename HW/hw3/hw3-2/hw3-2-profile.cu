@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda.h>
-#include <omp.h>
 
 //======================
 #define DEV_NO 0
@@ -125,6 +124,7 @@ __global__ void block_FW_p2(int* dist, int round, int n){
         col[y + Half][x] = min(col[y + Half][x], col[y + Half][i] + shr[i][x]);
         col[y][x + Half] = min(col[y][x + Half], col[y][i] + shr[i][x + Half]);
         col[y + Half][x + Half] = min(col[y + Half][x + Half], col[y + Half][i] + shr[i][x + Half]);
+        __syncthreads();
     }
     
     dist[pivotr * n + respc] = row[y][x]; 
@@ -139,8 +139,8 @@ __global__ void block_FW_p2(int* dist, int round, int n){
     return;
 }
 
-__global__ void block_FW_p3(int* dist, int round, int n, int row_offset){
-    if(blockIdx.x == round || (blockIdx.y + row_offset) == round) return;
+__global__ void block_FW_p3(int* dist, int round, int n){
+    if(blockIdx.x == round || blockIdx.y == round) return;
     __shared__ int shr[Blocksize][Blocksize];
     __shared__ int row[Blocksize][Blocksize];
     __shared__ int col[Blocksize][Blocksize];
@@ -149,7 +149,7 @@ __global__ void block_FW_p3(int* dist, int round, int n, int row_offset){
     int y = threadIdx.y; // row
     // my real col and real row in the whole matrix
     int realc = blockIdx.x * Blocksize + threadIdx.x;
-    int realr = (blockIdx.y + row_offset) * Blocksize + threadIdx.y;
+    int realr = blockIdx.y * Blocksize + threadIdx.y;
     // The needed position to calculate my value
     int neededc = round * Blocksize + threadIdx.x; // if the needed row is the same as me, calculate the needed col
     int neededr = round * Blocksize + threadIdx.y; // if the needed col is the same as me, calculate the needed col
@@ -189,9 +189,16 @@ __global__ void block_FW_p3(int* dist, int round, int n, int row_offset){
 
 
 int main(int argc, char* argv[]) {
+    struct timespec io_instart, io_inend, io_outstart, io_outend;
+    double io_elapsed = 0;
+    clock_gettime(CLOCK_MONOTONIC, &io_instart);
     input(argv[1]);
-    int* ddist[2];
+    clock_gettime(CLOCK_MONOTONIC, &io_inend);
+    io_elapsed += (io_inend.tv_sec - io_instart.tv_sec) + (io_inend.tv_nsec - io_instart.tv_nsec) / 1e9;
+    int* ddist;
     // cudaHostRegister(Dist, n * n * sizeof(int), cudaHostRegisterDefault);
+    cudaMalloc(&ddist, n * n * sizeof(int));
+    cudaMemcpy(ddist, Dist, n * n * sizeof(int), cudaMemcpyHostToDevice);
 
     // cudaGetDeviceProperties(&prop, DEV_NO);
     // printf("maxThreasPerBlock = %d, sharedMemPerBlock = %d", prop.maxThreadsPerBlock, prop.sharedMemPerBlock);
@@ -199,39 +206,30 @@ int main(int argc, char* argv[]) {
     int B = n / Blocksize;
     dim3 num_blocks_p1(1, 1);
     dim3 num_blocks_p2(1, B);
-    dim3 num_threads(32, 32);
-    //printf("n: %d, B: %d\n", n, B);
-    #pragma omp parallel num_threads(2)
-    {
-        int id = omp_get_thread_num();
-        cudaSetDevice(id);
-        cudaDeviceEnablePeerAccess(!id, 0);
-        cudaMalloc(&(ddist[id]), n * n * sizeof(int));
-        cudaMemcpy(ddist[id], Dist, n * n * sizeof(int), cudaMemcpyHostToDevice);
-        
-        dim3 num_blocks_p3(B, B / 2);
-        int row_offset = 0;
-        if(id){
-            row_offset = B / 2;
-            if(B & 1) num_blocks_p3.y++;
-        } 
-        //printf("Thread ID: %d, row_offset: %d, num_block_p3.y: %d\n", id, row_offset, num_blocks_p3.y);
+    dim3 num_blocks_p3(B, B);
+    dim3 num_threads(Half, Half);
 
-        for(int i = 0; i < B; i++){
-            if(!id && i < B / 2){
-                //printf("thread %d do the %d round\n", id, i);
-                cudaMemcpyPeer(ddist[1] + i * Blocksize * n, 1, ddist[0] + i * Blocksize * n, 0, Blocksize * n * sizeof(int));
-            }else if(id && i >= B / 2){
-                //printf("thread %d do the %d round\n", id, i);
-                cudaMemcpyPeer(ddist[0] + i * Blocksize * n, 0, ddist[1] + i * Blocksize * n, 1, Blocksize * n * sizeof(int));
-            }
-            #pragma omp barrier
-            block_FW_p1<<<num_blocks_p1, num_threads>>>(ddist[id], i, n);
-            block_FW_p2<<<num_blocks_p2, num_threads>>>(ddist[id], i, n);
-            block_FW_p3<<<num_blocks_p3, num_threads>>>(ddist[id], i, n, row_offset);
-        }
-        cudaMemcpy(Dist + row_offset * Blocksize * n, ddist[id] + row_offset * Blocksize * n, num_blocks_p3.y * Blocksize * n * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start, 0);
+    for(int i = 0; i < B; i++){
+        block_FW_p1<<<num_blocks_p1, num_threads>>>(ddist, i, n);
+        block_FW_p2<<<num_blocks_p2, num_threads>>>(ddist, i, n);
+        block_FW_p3<<<num_blocks_p3, num_threads>>>(ddist, i, n);
     }
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    float elapsedTime;
+    cudaEventElapsedTime(&elapsedTime, start, stop);
+    printf("Elapsed Time: %f\n", elapsedTime);
+
+    cudaMemcpy(Dist, ddist, n * n * sizeof(int), cudaMemcpyDeviceToHost);
+    
+    clock_gettime(CLOCK_MONOTONIC, &io_outstart);
     output(argv[2]);
+    clock_gettime(CLOCK_MONOTONIC, &io_outend);
+    io_elapsed += (io_outend.tv_sec - io_outstart.tv_sec) + (io_outend.tv_nsec - io_outstart.tv_nsec) / 1e9;
+    printf("IO Elapsed Time: %f\n", io_elapsed);
     return 0;
 }

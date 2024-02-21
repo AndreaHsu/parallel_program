@@ -1,0 +1,265 @@
+[1mdiff --git a/examples/ucp_hello_world.c b/examples/ucp_hello_world.c[m
+[1mindex d07dd47..5c69f7d 100644[m
+[1m--- a/examples/ucp_hello_world.c[m
+[1m+++ b/examples/ucp_hello_world.c[m
+[36m@@ -572,6 +572,7 @@[m [mint main(int argc, char **argv)[m
+     ucp_params.request_init    = request_init;[m
+     ucp_params.name            = "hello_world";[m
+ [m
+[32m+[m[32m    // Andrea: Init UCP context[m
+     status = ucp_init(&ucp_params, config, &ucp_context);[m
+ [m
+     if (print_config) {[m
+[1mdiff --git a/hw4.diff b/hw4.diff[m
+[1mnew file mode 100644[m
+[1mindex 0000000..e69de29[m
+[1mdiff --git a/src/ucp/core/ucp_context.c b/src/ucp/core/ucp_context.c[m
+[1mindex 304a3fa..fdeb619 100644[m
+[1m--- a/src/ucp/core/ucp_context.c[m
+[1m+++ b/src/ucp/core/ucp_context.c[m
+[36m@@ -1109,7 +1109,7 @@[m [mucp_add_tl_resources(ucp_context_h context, ucp_md_index_t md_index,[m
+         status = UCS_ERR_NO_MEMORY;[m
+         goto err_free_resources;[m
+     }[m
+[31m-[m
+[32m+[m[32m    //printf("FUCK: %d\n", config->tls.array.count);[m
+     /* print configuration */[m
+     for (i = 0; i < config->tls.array.count; ++i) {[m
+         ucs_trace("allowed transport %d : '%s'", i, config->tls.array.names[i]);[m
+[36m@@ -1495,6 +1495,7 @@[m [mucp_add_component_resources(ucp_context_h context, ucp_rsc_index_t cmpt_index,[m
+         }[m
+ [m
+         /* Add communication resources of each MD */[m
+[32m+[m
+         status = ucp_add_tl_resources(context, md_index, config, aux_tls,[m
+                                       &num_tl_resources, avail_devices,[m
+                                       avail_tls, dev_cfg_masks, tl_cfg_mask);[m
+[36m@@ -1925,7 +1926,7 @@[m [mstatic ucs_status_t ucp_fill_config(ucp_context_h context,[m
+     }[m
+ [m
+     /* Save environment prefix to later notify user for unused variables */[m
+[31m-    context->config.env_prefix = ucs_strdup(config->env_prefix, "ucp config");[m
+[32m+[m[32m    context->config.env_prefix = ucs_strdup(config->env_prefix, "ucp config"); // MPI_UCX[m
+     if (context->config.env_prefix == NULL) {[m
+         status = UCS_ERR_NO_MEMORY;[m
+         goto err_free_config_ext;[m
+[1mdiff --git a/src/ucp/core/ucp_context.h b/src/ucp/core/ucp_context.h[m
+[1mindex 01773db..7f03974 100644[m
+[1m--- a/src/ucp/core/ucp_context.h[m
+[1m+++ b/src/ucp/core/ucp_context.h[m
+[36m@@ -169,7 +169,7 @@[m [mtypedef struct ucp_context_config {[m
+ [m
+ typedef UCS_CONFIG_STRING_ARRAY_FIELD(names) ucp_context_config_names_t;[m
+ [m
+[31m-[m
+[32m+[m[32m// Andrea: ucp_config defination[m
+ struct ucp_config {[m
+     /** Array of device lists names to use.[m
+      *  This array holds four lists - network devices, shared memory devices,[m
+[36m@@ -304,6 +304,7 @@[m [mtypedef struct ucp_context {[m
+ [m
+     uint64_t                      mem_type_mask;            /* Supported mem type mask */[m
+ [m
+[32m+[m[32m    // Andrea: print tl_rscs and num_tls and proto_bitmap (tl means Transport Layer)[m
+     ucp_tl_resource_desc_t        *tl_rscs;   /* Array of communication resources */[m
+     ucp_tl_bitmap_t               tl_bitmap;  /* Cached map of tl resources used by workers.[m
+                                                * Not all resources may be used if unified[m
+[1mdiff --git a/src/ucp/core/ucp_ep.c b/src/ucp/core/ucp_ep.c[m
+[1mindex 1c0f16c..8a2fb21 100644[m
+[1m--- a/src/ucp/core/ucp_ep.c[m
+[1m+++ b/src/ucp/core/ucp_ep.c[m
+[36m@@ -359,13 +359,14 @@[m [mucs_status_t ucp_ep_create_base(ucp_worker_h worker, unsigned ep_init_flags,[m
+ {[m
+     ucs_status_t status;[m
+     ucp_ep_h ep;[m
+[31m-[m
+[32m+[m[32m    // Andrea: finish allocation of lane for ep[m[41m [m
+     ep = ucp_ep_allocate(worker, peer_name);[m
+     if (ep == NULL) {[m
+         status = UCS_ERR_NO_MEMORY;[m
+         goto err;[m
+     }[m
+ [m
+[32m+[m[32m    // Andrea: init queue and list[m
+     ucp_stream_ep_init(ep);[m
+     ucp_am_ep_init(ep);[m
+ [m
+[36m@@ -827,6 +828,7 @@[m [mucp_ep_create_to_worker_addr(ucp_worker_h worker,[m
+     }[m
+ [m
+     /* initialize transport endpoints */[m
+[32m+[m[32m    // Andrea go here[m
+     status = ucp_wireup_init_lanes(ep, ep_init_flags, local_tl_bitmap,[m
+                                    remote_address, addr_indices);[m
+     if (status != UCS_OK) {[m
+[36m@@ -1080,7 +1082,7 @@[m [mucp_ep_create_api_to_worker_addr(ucp_worker_h worker,[m
+         ucp_stream_ep_activate(ep);[m
+         goto out_resolve_remote_id;[m
+     }[m
+[31m-[m
+[32m+[m[32m    // printf("4\n"); // Andrea: if no existing unconnected ep, then create it[m
+     status = ucp_ep_create_to_worker_addr(worker, &ucp_tl_bitmap_max,[m
+                                           &remote_address, ep_init_flags,[m
+                                           "from api call", addr_indices, &ep);[m
+[36m@@ -1187,6 +1189,7 @@[m [mucs_status_t ucp_ep_create(ucp_worker_h worker, const ucp_ep_params_t *params,[m
+     } else if (params->field_mask & UCP_EP_PARAM_FIELD_CONN_REQUEST) {[m
+         status = ucp_ep_create_api_conn_request(worker, params, &ep);[m
+     } else if (params->field_mask & UCP_EP_PARAM_FIELD_REMOTE_ADDRESS) {[m
+[32m+[m[32m        // printf("0\n"); // Andrea[m
+         status = ucp_ep_create_api_to_worker_addr(worker, params, &ep);[m
+     } else {[m
+         status = UCS_ERR_INVALID_PARAM;[m
+[36m@@ -1914,6 +1917,7 @@[m [mint ucp_ep_config_is_equal(const ucp_ep_config_key_t *key1,[m
+     return 1;[m
+ }[m
+ [m
+[32m+[m[32m// Andrea: This function collects the protocols that current system chooses[m
+ void ucp_ep_config_name(ucp_worker_h worker, ucp_worker_cfg_index_t cfg_index,[m
+                         ucs_string_buffer_t *strb)[m
+ {[m
+[1mdiff --git a/src/ucp/core/ucp_worker.c b/src/ucp/core/ucp_worker.c[m
+[1mindex 5adcee9..4a23be2 100644[m
+[1m--- a/src/ucp/core/ucp_worker.c[m
+[1m+++ b/src/ucp/core/ucp_worker.c[m
+[36m@@ -15,6 +15,7 @@[m
+ #include "ucp_rkey.h"[m
+ #include "ucp_request.inl"[m
+ [m
+[32m+[m[32m#include <ucp/api/ucp.h>[m
+ #include <ucp/wireup/address.h>[m
+ #include <ucp/wireup/wireup_cm.h>[m
+ #include <ucp/wireup/wireup_ep.h>[m
+[36m@@ -988,6 +989,7 @@[m [mstatic int ucp_worker_iface_find_better(ucp_worker_h worker,[m
+  *[m
+  * @return Error code as defined by @ref ucs_status_t[m
+  */[m
+[32m+[m[32m// Andrea: choose the best UCX_TLS Here?[m
+ static void[m
+ ucp_worker_select_best_ifaces(ucp_worker_h worker, ucp_tl_bitmap_t *tl_bitmap_p)[m
+ {[m
+[36m@@ -1744,13 +1746,16 @@[m [mstatic void ucp_worker_add_feature_rsc(ucp_context_h context,[m
+     if (!lanes_bitmap) {[m
+         return;[m
+     }[m
+[31m-[m
+[32m+[m[32m    // printf("( ");[m
+[32m+[m[32m    // printf(feature_str);[m
+     ucs_string_buffer_appendf(strb, " %s(", feature_str);[m
+ [m
+     ucs_for_each_bit(lane, lanes_bitmap) {[m
+         ucs_assert(lane < UCP_MAX_LANES); /* make coverity happy */[m
+         rsc_idx = key->lanes[lane].rsc_index;[m
+         ucs_assert(rsc_idx != UCP_NULL_RESOURCE);[m
+[32m+[m[32m        // printf(UCT_TL_RESOURCE_DESC_FMT " ", UCT_TL_RESOURCE_DESC_ARG([m
+[32m+[m[32m        //         &context->tl_rscs[rsc_idx].tl_rsc));[m
+         ucs_string_buffer_appendf(strb, UCT_TL_RESOURCE_DESC_FMT " ",[m
+                                   UCT_TL_RESOURCE_DESC_ARG([m
+                                           &context->tl_rscs[rsc_idx].tl_rsc));[m
+[36m@@ -1777,7 +1782,7 @@[m [mucp_worker_print_used_tls(ucp_worker_h worker, ucp_worker_cfg_index_t cfg_index)[m
+     int amo_emul                    = 0;[m
+     int num_valid_lanes             = 0;[m
+     ucp_lane_index_t lane;[m
+[31m-[m
+[32m+[m[32m    ucp_config_t *config;[m
+     ucp_ep_config_name(worker, cfg_index, &strb);[m
+ [m
+     for (lane = 0; lane < key->num_lanes; ++lane) {[m
+[36m@@ -1853,6 +1858,9 @@[m [mucp_worker_print_used_tls(ucp_worker_h worker, ucp_worker_cfg_index_t cfg_index)[m
+     ucs_string_buffer_rtrim(&strb, "; ");[m
+ [m
+     ucs_info("%s", ucs_string_buffer_cstr(&strb));[m
+[32m+[m[32m    ucp_config_read(NULL, NULL, &config);[m
+[32m+[m[32m    ucp_config_print(config, stdout, ucs_string_buffer_cstr(&strb), UCS_CONFIG_PRINT_TLS);[m
+[32m+[m[32m    ucp_config_release(config);[m
+ }[m
+ [m
+ static ucs_status_t ucp_worker_init_mpools(ucp_worker_h worker)[m
+[36m@@ -2501,6 +2509,8 @@[m [mucs_status_t ucp_worker_create(ucp_context_h context,[m
+     /* At this point all UCT memory domains and interfaces are already created[m
+      * so print used environment variables and warn about unused ones.[m
+      */[m
+[32m+[m
+[32m+[m[32m    // printf(context->config.env_prefix); // Andrea: MPI_UCX_[1704561083.362108] [apollo31:319190:0][m
+     ucs_config_parser_print_env_vars_once(context->config.env_prefix);[m
+ [m
+     /* Warn unused cached uct configuration */[m
+[1mdiff --git a/src/ucp/wireup/wireup.c b/src/ucp/wireup/wireup.c[m
+[1mindex dfd6330..0f4cc60 100644[m
+[1m--- a/src/ucp/wireup/wireup.c[m
+[1m+++ b/src/ucp/wireup/wireup.c[m
+[36m@@ -1538,6 +1538,7 @@[m [mucs_status_t ucp_wireup_init_lanes(ucp_ep_h ep, unsigned ep_init_flags,[m
+     ucp_wireup_get_reachable_mds(ep, ep_init_flags, remote_address, &key);[m
+ [m
+     /* Load new configuration */[m
+[32m+[m[32m    // printf("3\n") // Andrea: go here[m
+     status = ucp_worker_get_ep_config(worker, &key, ep_init_flags,[m
+                                       &new_cfg_index);[m
+     if (status != UCS_OK) {[m
+[1mdiff --git a/src/ucs/config/parser.c b/src/ucs/config/parser.c[m
+[1mindex 82bc04b..09af1c8 100644[m
+[1m--- a/src/ucs/config/parser.c[m
+[1m+++ b/src/ucs/config/parser.c[m
+[36m@@ -1722,6 +1722,8 @@[m [mucs_config_parser_print_field(FILE *stream, const void *opts, const char *env_pr[m
+         snprintf(value_buf, sizeof(value_buf), " (deprecated)");[m
+         snprintf(syntax_buf, sizeof(syntax_buf), "N/A");[m
+     } else {[m
+[32m+[m[32m        // Andrea go here[m
+[32m+[m[32m        // opt = config, field->offset=4 -> TLS[m
+         snprintf(value_buf, sizeof(value_buf), "=");[m
+         field->parser.write(value_buf + 1, sizeof(value_buf) - 2,[m
+                             (char*)opts + field->offset,[m
+[36m@@ -1733,6 +1735,7 @@[m [mucs_config_parser_print_field(FILE *stream, const void *opts, const char *env_pr[m
+         ucs_config_parser_is_default(env_prefix, head->prefix, name)) {[m
+         default_config_prefix = "# ";[m
+     } else {[m
+[32m+[m[32m        // Andrea go here[m
+         default_config_prefix = "";[m
+     }[m
+ [m
+[36m@@ -1791,6 +1794,7 @@[m [mucs_config_parser_print_opts_recurs(FILE *stream, const void *opts,[m
+     size_t alias_table_offset;[m
+ [m
+     for (field = fields; !ucs_config_field_is_last(field); ++field) {[m
+[32m+[m[32m        printf("field name %s\n", field->name);[m
+         if (ucs_config_is_table_field(field)) {[m
+             /* Parse with sub-table prefix.[m
+              * We start the leaf prefix and continue up the hierarchy.[m
+[36m@@ -1878,8 +1882,13 @@[m [mvoid ucs_config_parser_print_opts(FILE *stream, const char *title, const void *o[m
+     }[m
+ [m
+     // TODO: PP-HW4[m
+[31m-    if (flags /*& UCS_CONFIG_PRINT_TLS*/) {[m
+[31m-[m
+[32m+[m[32m    if (flags & UCS_CONFIG_PRINT_TLS) {[m
+[32m+[m[32m        table_prefix_elem.prefix = table_prefix ? table_prefix : "";[m
+[32m+[m[32m        ucs_list_add_tail(&prefix_list, &table_prefix_elem.list);[m
+[32m+[m[32m        // field[4] records the TLS variables[m
+[32m+[m[32m        ucs_config_parser_print_field(stream, opts, prefix, &prefix_list,[m
+[32m+[m[32m                                        fields[4].name, &fields[4], flags, NULL);[m[41m [m
+[32m+[m[32m        fprintf(stream, "%s\n", title);[m
+     }[m
+ [m
+     if (flags & UCS_CONFIG_PRINT_HEADER) {[m
+[36m@@ -2033,7 +2042,7 @@[m [mstatic void ucs_config_parser_print_env_vars(const char *prefix)[m
+ [m
+         ucs_free(envstr);[m
+     }[m
+[31m-[m
+[32m+[m[41m    [m
+     pthread_mutex_unlock(&ucs_config_parser_env_vars_hash_lock);[m
+ [m
+     if (num_unused_vars > 0) {[m
+[1mdiff --git a/src/ucs/config/types.h b/src/ucs/config/types.h[m
+[1mindex c300a6b..cf2c72a 100644[m
+[1m--- a/src/ucs/config/types.h[m
+[1m+++ b/src/ucs/config/types.h[m
+[36m@@ -90,7 +90,8 @@[m [mtypedef enum {[m
+     UCS_CONFIG_PRINT_HEADER          = UCS_BIT(1),[m
+     UCS_CONFIG_PRINT_DOC             = UCS_BIT(2),[m
+     UCS_CONFIG_PRINT_HIDDEN          = UCS_BIT(3),[m
+[31m-    UCS_CONFIG_PRINT_COMMENT_DEFAULT = UCS_BIT(4)[m
+[32m+[m[32m    UCS_CONFIG_PRINT_COMMENT_DEFAULT = UCS_BIT(4),[m
+[32m+[m[32m    UCS_CONFIG_PRINT_TLS             = UCS_BIT(5)[m
+ } ucs_config_print_flags_t;[m
+ [m
+ [m
